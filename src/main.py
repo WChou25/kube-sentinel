@@ -1,3 +1,4 @@
+import argparse
 import sys
 from pathlib import Path
 
@@ -7,12 +8,6 @@ from parser import build_cluster_state
 from rules import evaluate_rules
 
 
-CASE_FILES = {
-    "safe": "safe_case.yaml",
-    "risky": "risky_case.yaml",
-}
-
-
 def _format_cluster_summary(cluster_state):
     lines = []
 
@@ -20,7 +15,18 @@ def _format_cluster_summary(cluster_state):
         lines.append(f"  - Service: {service['name']} ({service['type']})")
 
     for deployment in cluster_state["deployments"]:
-        suffix = " [PRIVILEGED]" if deployment["privileged"] else ""
+        tags = []
+        if deployment.get("privileged"):
+            tags.append("PRIVILEGED")
+        if deployment.get("host_network"):
+            tags.append("hostNetwork")
+        if deployment.get("host_pid"):
+            tags.append("hostPID")
+        if deployment.get("host_paths"):
+            tags.append("hostPath")
+        if deployment.get("capabilities"):
+            tags.append("caps:" + ",".join(deployment["capabilities"]))
+        suffix = f" [{' '.join(tags)}]" if tags else ""
         lines.append(f"  - Deployment: {deployment['name']}{suffix}")
 
     lines.append(f"  - NetworkPolicies: {len(cluster_state['network_policies'])}")
@@ -31,33 +37,85 @@ def _format_findings(findings):
     if not findings:
         return "  [LOW] No findings detected"
 
-    return "\n".join(
-        f"  [{finding['severity'].upper()}] {finding['title']}\n"
-        f"      {finding['details']}"
-        for finding in findings
-    )
+    blocks = []
+    for finding in findings:
+        score_tag = f" score={finding['score']}" if "score" in finding else ""
+        header = (
+            f"  [{finding['severity'].upper()}{score_tag}] {finding['title']}\n"
+            f"      {finding['details']}"
+        )
+        if finding.get("path"):
+            header += "\n      Path: " + " -> ".join(finding["path"])
+        blocks.append(header)
+    return "\n".join(blocks)
+
+
+def _resolve_case_path(arg, project_root):
+    cases_dir = project_root / "cases"
+    direct = Path(arg)
+    if direct.exists():
+        return direct
+    candidates = [
+        cases_dir / f"{arg}.yaml",
+        cases_dir / f"{arg}_case.yaml",
+        cases_dir / arg,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def _list_cases(project_root):
+    cases_dir = project_root / "cases"
+    if not cases_dir.exists():
+        return []
+    return sorted(p.stem for p in cases_dir.glob("*.yaml"))
 
 
 def main():
-    if len(sys.argv) != 2 or sys.argv[1] not in CASE_FILES:
-        print("Usage: python src/main.py [safe|risky]")
-        sys.exit(1)
-
-    case_name = sys.argv[1]
     project_root = Path(__file__).resolve().parent.parent
-    case_path = project_root / "cases" / CASE_FILES[case_name]
+
+    parser = argparse.ArgumentParser(description="Kube-Sentinel: Kubernetes misconfig analyzer")
+    parser.add_argument("case", help="Case name (e.g. 'risky') or path to a YAML file")
+    parser.add_argument(
+        "--llm",
+        action="store_true",
+        help="Use the Claude LLM agent for explanation (requires ANTHROPIC_API_KEY)",
+    )
+    args = parser.parse_args()
+
+    case_path = _resolve_case_path(args.case, project_root)
+    if case_path is None:
+        available = _list_cases(project_root)
+        if available:
+            print("Available cases: " + ", ".join(available))
+        sys.exit(1)
 
     objects = load_yaml_documents(case_path)
     cluster_state = build_cluster_state(objects)
     findings = evaluate_rules(cluster_state)
-    explanation = generate_explanation(cluster_state, findings)
 
     print(f"Loaded case: {case_path.name}\n")
     print("CLUSTER SUMMARY")
     print(_format_cluster_summary(cluster_state))
     print("\nFINDINGS")
     print(_format_findings(findings))
-    print("\nAI ANALYSIS")
+
+    explanation = None
+    if args.llm:
+        from llm_agent import generate_llm_explanation
+
+        print("\nLLM AGENT ANALYSIS (Claude Opus 4.7 with tool use)")
+        explanation = generate_llm_explanation(cluster_state, findings)
+        if explanation is None:
+            print("  [!] LLM agent unavailable (missing ANTHROPIC_API_KEY or SDK). "
+                  "Falling back to simulated agent.")
+
+    if explanation is None:
+        print("\nAI ANALYSIS (simulated)")
+        explanation = generate_explanation(cluster_state, findings)
+
     print(explanation)
 
 

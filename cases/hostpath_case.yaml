@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: log-collector-svc
+spec:
+  type: LoadBalancer
+  selector:
+    app: log-collector
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: log-collector
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: log-collector
+  template:
+    metadata:
+      labels:
+        app: log-collector
+    spec:
+      containers:
+        - name: collector
+          image: fluent/fluent-bit:latest
+          volumeMounts:
+            - name: host-root
+              mountPath: /host
+      volumes:
+        - name: host-root
+          hostPath:
+            path: /
