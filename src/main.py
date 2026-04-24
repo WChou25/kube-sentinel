@@ -83,6 +83,11 @@ def main():
         action="store_true",
         help="Use the Claude LLM agent for explanation (requires ANTHROPIC_API_KEY)",
     )
+    parser.add_argument(
+        "--sarif",
+        metavar="PATH",
+        help="Write findings as SARIF 2.1.0 to PATH (for CI code scanning)",
+    )
     args = parser.parse_args()
 
     case_path = _resolve_case_path(args.case, project_root)
@@ -95,6 +100,12 @@ def main():
     objects = load_yaml_documents(case_path)
     cluster_state = build_cluster_state(objects)
     findings = evaluate_rules(cluster_state)
+
+    if args.sarif:
+        from sarif import write_sarif
+
+        write_sarif(findings, case_path, args.sarif)
+        print(f"SARIF written to {args.sarif}")
 
     print(f"Loaded case: {case_path.name}\n")
     print("CLUSTER SUMMARY")

@@ -44,6 +44,21 @@ EXPECTED = {
         "should_flag": ["privileged", "external exposure"],
         "should_not_flag": ["attack path", "missing networkpolicy"],
     },
+    "ingress_case": {
+        "expected_attack_paths": 1,
+        "should_flag": ["attack path", "privileged", "external exposure via ingress"],
+        "should_not_flag": [],
+    },
+    "hardening_case": {
+        "expected_attack_paths": 0,
+        "should_flag": ["allowprivilegeescalation", "runasnonroot", "missing cpu/memory limits"],
+        "should_not_flag": ["attack path", "privileged workload detected"],
+    },
+    "multihop_case": {
+        "expected_attack_paths": 1,
+        "should_flag": ["multi-hop", "privileged", "attack path"],
+        "should_not_flag": [],
+    },
 }
 
 

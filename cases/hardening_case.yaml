@@ -1,0 +1,61 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: weak-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: weak-app
+  template:
+    metadata:
+      labels:
+        app: weak-app
+    spec:
+      containers:
+        - name: weak-app
+          image: python:3.11-slim
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-export
+spec:
+  schedule: "0 2 * * *"
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: exporter
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: exporter
+              image: alpine:latest
+              securityContext:
+                allowPrivilegeEscalation: true
+                readOnlyRootFilesystem: false
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: log-agent
+spec:
+  selector:
+    matchLabels:
+      app: log-agent
+  template:
+    metadata:
+      labels:
+        app: log-agent
+    spec:
+      containers:
+        - name: log-agent
+          image: fluent/fluent-bit:latest
+          securityContext:
+            runAsNonRoot: false
+          resources:
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

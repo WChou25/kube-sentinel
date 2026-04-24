@@ -71,6 +71,21 @@ def can_pod_reach(source, target, network_policies):
     return False
 
 
+def blocking_policies(source, target, network_policies):
+    applicable = [
+        policy
+        for policy in network_policies
+        if _policy_applies(policy, target, "Ingress")
+    ]
+    if not applicable:
+        return []
+    for policy in applicable:
+        for rule in policy.get("ingress", []) or []:
+            if _rule_allows(rule, source=source, external=False):
+                return []
+    return applicable
+
+
 def can_external_reach(target, network_policies):
     applicable = [
         policy
@@ -90,14 +105,26 @@ def is_externally_exposed(service):
     return service.get("type") in EXTERNAL_SERVICE_TYPES
 
 
+def _ingress_exposed_service_names(cluster_state):
+    exposed = set()
+    for ingress in cluster_state.get("ingresses", []) or []:
+        for backend in ingress.get("backends", []) or []:
+            name = backend.get("service_name")
+            if name:
+                exposed.add((ingress.get("namespace", "default"), name))
+    return exposed
+
+
 def exposed_entry_points(cluster_state):
     services = cluster_state.get("services", [])
     deployments = cluster_state.get("deployments", [])
     policies = cluster_state.get("network_policies", [])
+    ingress_services = _ingress_exposed_service_names(cluster_state)
 
     entries = []
     for service in services:
-        if not is_externally_exposed(service):
+        exposed_via_ingress = (service["namespace"], service["name"]) in ingress_services
+        if not is_externally_exposed(service) and not exposed_via_ingress:
             continue
         for target in service_targets(service, deployments):
             if can_external_reach(target, policies):
